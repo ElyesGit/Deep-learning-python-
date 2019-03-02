@@ -1,0 +1,161 @@
+from __future__ import print_function
+import os
+import pickle
+import gzip
+import argparse
+import numpy as np
+import time
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as NN
+import torch.optim as optim
+import torch.nn.init as init
+import torch.nn.functional as F
+import torchvision
+import torchvision.transforms
+
+f = gzip.open('mnist.pkl.gz', 'rb')
+train, valid, test = pickle.load(f, encoding='latin1')
+f.close()
+
+class ConvNet(torch.nn.Module):
+    
+    def __init__(self):
+   
+        super().__init__()
+        # First convolution outputting 16*16 matrices (each representing a feature, eg shape)
+        self.conv1 = torch.nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)
+        self.pool1 = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.conv1_bn = torch.nn.BatchNorm2d(16)
+        #self.dropout1 = torch.nn.Dropout(p=0.5)
+        
+        # Second convolution outputting 32*32 matrices 
+        self.conv2 = torch.nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.pool2 = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.conv2_bn = torch.nn.BatchNorm2d(32)
+        #self.dropout2 = torch.nn.Dropout(p=0.5)
+        
+        # Third convolution outputting 64*64 matrices
+        self.conv3 = torch.nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.pool3 = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.conv3_bn = torch.nn.BatchNorm2d(64)
+        #self.dropout3 = torch.nn.Dropout(p=0.5)
+        
+        # Forth convolution outputting a vector of length 128
+        self.conv4 = torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+        self.pool4 = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        # fully connected layer. Output shape is [batch_size, 10]
+        self.fc1 = torch.nn.Linear(128, 10)
+ 
+    def forward(self, x):
+        """
+        Forward computation
+        """
+        # compute the first activation
+        x = F.relu(self.conv1(x))
+        # perform pooling operation
+        x = self.pool1(x)
+        # compute the second activation
+        x = self.dropout1(x)
+        x = self.conv1_bn(x)
+        x = F.relu(self.conv2(x))
+        # perform pooling operation
+        x = self.pool2(x)
+        # compute the third activation
+        x = self.dropout2(x)
+        x = self.conv2_bn(x)
+        x = F.relu(self.conv3(x))
+        # perform pooling operation
+        x = self.pool3(x)
+        # compute the fourth activation
+        x = self.dropout3(x)
+        x = self.conv3_bn(x)
+        x = F.relu(self.conv4(x))
+        # perform the pooling operation
+        x = self.pool4(x)
+        # reshape the data for linear operation
+        x = x.view(-1, 128)
+        # activation function for fully-connected layer
+        x = self.fc1(x)
+        return x
+
+
+
+def adam_optimizer(net, lr):
+    """
+    We use the adam optimizer for training
+    """
+    # learning rate for gradient descent
+    lr = 1e-4
+    
+    # we use the cross entropy loss 
+    loss = torch.nn.CrossEntropyLoss()
+    opt = optim.Adam(net.parameters(), lr=lr)
+    return loss, opt
+
+
+
+def train_net(conv_net, batch_size, n_epochs, lr=None, graph=None):
+   
+   # reshape the data from MNIST to the right shapes
+    def reshape(x): return np.reshape(x, [-1, 1, 28, 28])
+    x_valid = reshape(valid[0])
+    x_test = reshape(test[0])
+    y_valid = valid[1]
+    y_test = test[1]
+    
+    # Create the loss operation and the optimizer
+    loss_op, opt = adam_optimizer(conv_net, lr)
+   
+   # get the starting epoch number
+    start_epoch = 0
+ 
+    # Train the network with shuffled training data
+    for epoch in range(start_epoch, n_epochs+start_epoch):
+        train = shuffle(train)
+        x_train = reshape(train[0])
+        y_train = train[1]
+        valid_loss = 0
+        test_loss = 0
+        train_loss = 0
+        acc_test = 0
+       
+       for i in range(50000 // batch_size):
+            batch = x_train[i:i + batch_size]
+            label = y_train[i:i + batch_size]
+            batch = torch.from_numpy(batch)
+            label = torch.from_numpy(label)    
+            
+            # set the parameters gradients to zero for this mini-batch
+            opt.zero_grad()
+            
+            # Forward pass, backpropagation and update
+            output = conv_net(batch)
+            loss = loss_op(output, label)
+            loss.backward()
+            opt.step()
+            
+            # add current loss to the total training loss
+            train_loss += loss.item()
+            acc_test += sum([1 if label[i] == torch.argmax(output[i], dim=0) else 0 for i in range(len(output))])/len(output)
+        
+        # print training loss
+        print("Training loss after epoch {} is: ".format(epoch), 1-(acc_test/49984))
+        print("Cross-entropy training loss after epoch {} is: ".format(epoch), train_loss / len(train[0]))
+        
+        # after an epoch, compute the loss on the validation set
+        data, label = torch.from_numpy(x_test), torch.from_numpy(y_test)
+        output = conv_net(data)
+        loss = loss_op(output, label)
+        test_loss += loss.item()
+        
+        print("Cross-entropy test loss after epoch {} is: ".format(epoch), test_loss / len(test[0]))
+        acc = sum([1 if y_test[i] == torch.argmax(output[i], dim=0) else 0 for i in range(len(output))])/len(output)
+        print("Accuracy at test set  after epoch {} is: ".format(epoch), acc)
+        
+        
+        
+
+#main
+neurr = ConvNet()
+train_net(neurr, 64, 10, None)
